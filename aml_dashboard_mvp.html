@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AML Transaction Monitoring – MVP</title>
+  <!-- External libs (lightweight, CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;         /* slate-900 */
+      --panel: #111827;      /* gray-900 */
+      --muted: #94a3b8;      /* slate-400 */
+      --brand: #2563eb;      /* blue-600 */
+      --brand-2: #1e40af;    /* blue-800 */
+      --danger: #ef4444;     /* red-500 */
+      --ok: #10b981;         /* emerald-500 */
+      --warn: #f59e0b;       /* amber-500 */
+      --card: #0b1220;
+      --border: #1f2937;
+      --text: #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial;
+      color: var(--text);
+      background: radial-gradient(1200px 500px at 10% -10%, #1d2b4a 0%, var(--bg) 40%);
+      min-height: 100vh;
+    }
+    header {
+      background: linear-gradient(90deg, var(--brand-2), var(--brand));
+      padding: 18px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky; top: 0; z-index: 10;
+      box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    }
+    header .title { font-weight: 800; letter-spacing: .4px; font-size: 1.15rem; }
+    header .badge { background: rgba(255,255,255,.15); padding: 6px 10px; border-radius: 999px; font-size: .85rem; }
+    .container { padding: 26px; max-width: 1280px; margin: 0 auto; }
+    .grid { display: grid; gap: 18px; }
+    .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    @media (max-width: 1100px) { .grid.cols-3 { grid-template-columns: 1fr; } .grid.cols-2 { grid-template-columns: 1fr; } }
+    .panel {
+      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.25);
+      backdrop-filter: blur(6px);
+    }
+    .panel h3 { margin: 0 0 8px 0; font-size: 1rem; color: #dbeafe; font-weight: 700; letter-spacing: .3px; }
+    .muted { color: var(--muted); font-size: .9rem; }
+    .uploader {
+      display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    }
+    input[type="file"] {
+      background: #0b1220; border: 1px dashed #334155; color: var(--text);
+      padding: 10px 12px; border-radius: 12px; cursor: pointer; width: 320px;
+    }
+    .btn {
+      border: 1px solid #2b3a55; color: #e2e8f0; background: #0b1220;
+      padding: 10px 14px; border-radius: 12px; cursor: pointer; font-weight: 600;
+      transition: transform .08s ease, border-color .2s ease;
+    }
+    .btn.primary { background: linear-gradient(90deg, var(--brand-2), var(--brand)); border: none; }
+    .btn:active { transform: translateY(1px) }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    @media (max-width: 900px) { .kpis { grid-template-columns: 1fr 1fr; } }
+    .kpi {
+      background: linear-gradient(180deg, rgba(37,99,235,.12), rgba(255,255,255,.02));
+      border: 1px solid #1f2f56; border-radius: 16px; padding: 14px 16px;
+    }
+    .kpi .value { font-size: 1.6rem; font-weight: 800; margin-top: 6px; }
+    .kpi small { color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px 10px; border-bottom: 1px solid #1f2937; text-align: left; font-size: .95rem; }
+    thead th { position: sticky; top: 68px; background: #0b1220; z-index: 5; }
+    tbody tr:hover { background: rgba(255,255,255,.03); }
+    .chip { padding: 3px 8px; border-radius: 999px; font-size: .8rem; font-weight: 700; }
+    .chip.ok { background: rgba(16,185,129,.1); color: #86efac; border: 1px solid rgba(16,185,129,.3); }
+    .chip.warn { background: rgba(245,158,11,.1); color: #fcd34d; border: 1px solid rgba(245,158,11,.3); }
+    .chip.danger { background: rgba(239,68,68,.1); color: #fecaca; border: 1px solid rgba(239,68,68,.3); }
+    .tag { padding: 2px 6px; border: 1px solid #334155; border-radius: 6px; margin-right: 6px; font-size: .75rem; color: #cbd5e1; }
+    .flex { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .alerts { max-height: 260px; overflow: auto; }
+    .alert-item {
+      border-left: 4px solid var(--danger); padding: 8px 10px; border-radius: 8px; background: rgba(239,68,68,.07); margin-bottom: 8px;
+    }
+    .footer-note { text-align:center; opacity:.7; font-size:.85rem; margin-top: 14px; }
+    .small { font-size: .85rem; }
+    canvas { width: 100% !important; height: 300px !important; }
+    .right-actions { display: flex; gap: 10px; align-items: center; }
+    .hint { color: #93c5fd; font-size: .85rem; }
+    .badge-risk { font-weight: 800; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">AML Transaction Monitoring – MVP</div>
+    <div class="right-actions">
+      <span class="badge">Hybrid Rules + AI Signals</span>
+      <button class="btn primary" id="downloadSTR">Download STR Report (PDF)</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="panel">
+      <h3>Upload Transactions CSV</h3>
+      <p class="muted small">Required columns: <code>transaction_id, customer_id, amount, country, type</code>. Optional: <code>date (YYYY-MM-DD)</code>. If <code>date</code> is missing, the system auto-assigns sequential dates for demo.</p>
+      <div class="uploader">
+        <input type="file" id="fileInput" accept=".csv" />
+        <button class="btn" id="loadSample">Load Sample (Synthetic)</button>
+        <span class="hint">Tip: Use the sample first to see charts & alerts.</span>
+      </div>
+    </div>
+
+    <div class="grid cols-3">
+      <div class="panel">
+        <h3>Overview</h3>
+        <div class="kpis">
+          <div class="kpi">
+            <small>Total Transactions</small>
+            <div class="value" id="kpiTotal">0</div>
+          </div>
+          <div class="kpi">
+            <small>Suspicious</small>
+            <div class="value" id="kpiSuspicious">0</div>
+          </div>
+          <div class="kpi">
+            <small>Unique Customers</small>
+            <div class="value" id="kpiCustomers">0</div>
+          </div>
+          <div class="kpi">
+            <small>High-Risk Customers</small>
+            <div class="value" id="kpiHighRisk">0</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Risk Distribution</h3>
+        <canvas id="riskPie"></canvas>
+      </div>
+
+      <div class="panel">
+        <h3>Suspicious by Country</h3>
+        <canvas id="countryBar"></canvas>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top: 18px;">
+      <div class="panel">
+        <h3>Live Alerts</h3>
+        <div id="alerts" class="alerts"></div>
+      </div>
+      <div class="panel">
+        <h3>Suspicious Trend</h3>
+        <canvas id="trendLine"></canvas>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top: 18px;">
+      <div class="flex" style="justify-content: space-between;">
+        <h3>Transactions</h3>
+        <div class="muted small">Click column headers in your CSV to control ordering before upload for specific demos.</div>
+      </div>
+      <div style="overflow:auto;">
+        <table id="txTable">
+          <thead>
+            <tr>
+              <th>Tx ID</th>
+              <th>Customer</th>
+              <th>Amount (₹)</th>
+              <th>Country</th>
+              <th>Type</th>
+              <th>Date</th>
+              <th>Status</th>
+              <th>Reasons</th>
+              <th>Customer Risk</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="footer-note">© 2025 AML Detection MVP · For demonstration purposes only.</div>
+    </div>
+  </div>
+
+<script>
+// ---------- Utility helpers ----------
+function parseCSV(text) {
+  // Simple CSV parser for demo; assumes no embedded commas in fields
+  const rows = text.trim().split(/\r?\n/).map(r => r.split(",").map(s => s.trim()));
+  const headers = rows[0].map(h => h.toLowerCase());
+  return rows.slice(1).map(cols => {
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = (cols[i] ?? "").trim());
+    return obj;
+  });
+}
+
+function formatINR(x) {
+  const n = Number(x) || 0;
+  return n.toLocaleString("en-IN");
+}
+
+function addAlert(text) {
+  const wrap = document.getElementById("alerts");
+  const el = document.createElement("div");
+  el.className = "alert-item";
+  el.textContent = text;
+  wrap.prepend(el);
+}
+
+function badgeForRisk(score) {
+  if (score >= 70) return '<span class="chip danger badge-risk">HIGH</span>';
+  if (score >= 35) return '<span class="chip warn badge-risk">MEDIUM</span>';
+  return '<span class="chip ok badge-risk">LOW</span>';
+}
+
+// ---------- Core detection logic ----------
+const HIGH_RISK_COUNTRIES = new Set(["Iran","North Korea"]);
+const LARGE_TX = 1000000; // 10L
+const LARGE_CASH = 500000; // 5L
+const STRUCTURING_THRESHOLD = 500000; // "large" threshold for smurfing rule
+const STRUCTURING_COUNT = 3;
+const STRUCTURING_WINDOW_DAYS = 7;
+
+function ensureDates(data) {
+  const hasDate = data.length && ("date" in data[0]);
+  if (hasDate && data[0].date) return data;
+  // Assign sequential dates ending today for a nice trend
+  const today = new Date();
+  const start = new Date(today.getTime() - (data.length-1) * 24*3600*1000);
+  return data.map((row, idx) => {
+    const d = new Date(start.getTime() + idx * 24*3600*1000);
+    row.date = d.toISOString().slice(0,10);
+    return row;
+  });
+}
+
+function detect(data) {
+  // Normalize & cast
+  data = data.map(r => ({
+    transaction_id: r["transaction_id"],
+    customer_id: r["customer_id"],
+    amount: Number(r["amount"] || 0),
+    country: r["country"] || "India",
+    type: r["type"] || "UPI",
+    date: r["date"] || ""
+  }));
+
+  data = ensureDates(data);
+
+  // Index by customer for structuring checks
+  const byCustomer = {};
+  data.forEach(r => {
+    if (!byCustomer[r.customer_id]) byCustomer[r.customer_id] = [];
+    byCustomer[r.customer_id].push(r);
+  });
+  // Sort each customer's tx by date
+  for (const cid in byCustomer) {
+    byCustomer[cid].sort((a,b) => new Date(a.date) - new Date(b.date));
+  }
+
+  // Precompute structuring flags (≥3 large tx within 7 days)
+  const structuringCustomers = new Set();
+  for (const cid in byCustomer) {
+    const txs = byCustomer[cid];
+    let i = 0;
+    for (let j = 0; j < txs.length; j++) {
+      // Maintain window [i..j]
+      while (i <= j) {
+        const di = new Date(txs[i].date);
+        const dj = new Date(txs[j].date);
+        const days = (dj - di) / (24*3600*1000);
+        const countLarge = txs.slice(i, j+1).filter(t => t.amount >= STRUCTURING_THRESHOLD).length;
+        if (days <= STRUCTURING_WINDOW_DAYS && countLarge >= STRUCTURING_COUNT) {
+          structuringCustomers.add(cid);
+          break;
+        }
+        if (days > STRUCTURING_WINDOW_DAYS) { i++; } else { break; }
+      }
+      if (structuringCustomers.has(cid)) break;
+    }
+  }
+
+  // Evaluate per-transaction rules + compute customer risk
+  const customerScores = {}; // aggregate
+  const suspicious = [];
+  const countryCounts = {};
+  const trendCounts = {}; // date => suspicious count
+
+  const results = data.map(r => {
+    const reasons = [];
+    let suspiciousFlag = false;
+
+    if (r.amount >= LARGE_TX) { suspiciousFlag = true; reasons.push("High-value transaction (> ₹10L)"); }
+    if (r.type === "Cash" && r.amount >= LARGE_CASH) { suspiciousFlag = true; reasons.push("Large cash transaction (> ₹5L)"); }
+    if (HIGH_RISK_COUNTRIES.has(r.country)) { suspiciousFlag = true; reasons.push("Counterparty in high-risk country"); }
+
+    // AI-inspired signal: customer structuring pattern
+    if (structuringCustomers.has(r.customer_id) && r.amount >= STRUCTURING_THRESHOLD) {
+      suspiciousFlag = true;
+      reasons.push(`Repeated large tx by same customer within ${STRUCTURING_WINDOW_DAYS} days`);
+    }
+
+    // Customer risk scoring (simple, explainable)
+    const scoreParts = [];
+    let score = 0;
+    if (r.amount >= LARGE_TX) { score += 30; scoreParts.push("+30 high-value"); }
+    if (r.type === "Cash" && r.amount >= LARGE_CASH) { score += 25; scoreParts.push("+25 large cash"); }
+    if (HIGH_RISK_COUNTRIES.has(r.country)) { score += 25; scoreParts.push("+25 high-risk country"); }
+    if (structuringCustomers.has(r.customer_id)) { score += 35; scoreParts.push("+35 structuring pattern"); }
+    // Normalize to 0–100 cap
+    score = Math.min(100, score);
+    customerScores[r.customer_id] = Math.max(customerScores[r.customer_id] || 0, score);
+
+    if (suspiciousFlag) {
+      suspicious.push(r);
+      countryCounts[r.country] = (countryCounts[r.country] || 0) + 1;
+      const d = r.date;
+      trendCounts[d] = (trendCounts[d] || 0) + 1;
+      addAlert(`Customer ${r.customer_id} flagged: ₹${formatINR(r.amount)} ${r.type} to ${r.country} on ${r.date}`);
+    }
+
+    return { ...r, suspicious: suspiciousFlag, reasons, riskScore: score, scoreParts };
+  });
+
+  // Compute KPIs
+  const total = data.length;
+  const uniqueCustomers = new Set(data.map(r => r.customer_id)).size;
+  const highRiskCustomers = Object.values(customerScores).filter(v => v >= 70).length;
+
+  return {
+    rows: results,
+    total,
+    suspiciousCount: suspicious.length,
+    uniqueCustomers,
+    highRiskCustomers,
+    customerScores,
+    countryCounts,
+    trendCounts
+  };
+}
+
+// ---------- UI wiring ----------
+const elFile = document.getElementById("fileInput");
+const elTableBody = document.querySelector("#txTable tbody");
+const elKpiTotal = document.getElementById("kpiTotal");
+const elKpiSuspicious = document.getElementById("kpiSuspicious");
+const elKpiCustomers = document.getElementById("kpiCustomers");
+const elKpiHighRisk = document.getElementById("kpiHighRisk");
+
+let charts = { riskPie: null, countryBar: null, trendLine: null };
+let latestResults = null;
+
+function render(results) {
+  latestResults = results;
+  // KPIs
+  elKpiTotal.textContent = results.total;
+  elKpiSuspicious.textContent = results.suspiciousCount;
+  elKpiCustomers.textContent = results.uniqueCustomers;
+  elKpiHighRisk.textContent = results.highRiskCustomers;
+
+  // Table
+  elTableBody.innerHTML = "";
+  results.rows.forEach(r => {
+    const tr = document.createElement("tr");
+    if (r.suspicious) tr.style.background = "rgba(239,68,68,.08)";
+    tr.innerHTML = `
+      <td>${r.transaction_id}</td>
+      <td>${r.customer_id}</td>
+      <td>₹${formatINR(r.amount)}</td>
+      <td>${r.country}</td>
+      <td>${r.type}</td>
+      <td>${r.date}</td>
+      <td>${r.suspicious ? '<span class="chip danger">SUSPICIOUS</span>' : '<span class="chip ok">SAFE</span>'}</td>
+      <td>${r.reasons.length ? r.reasons.map(x => `<span class="tag">${x}</span>`).join(" ") : '<span class="muted">—</span>'}</td>
+      <td>${badgeForRisk(r.riskScore)}</td>
+    `;
+    elTableBody.appendChild(tr);
+  });
+
+  // Charts
+  const safe = results.total - results.suspiciousCount;
+  const pieData = [safe, results.suspiciousCount];
+  upsertChart("riskPie", {
+    type: "pie",
+    data: { labels: ["Safe", "Suspicious"], datasets: [{ data: pieData }]},
+    options: { plugins: { legend: { labels: { color: "#e5e7eb" } } } }
+  });
+
+  const countries = Object.keys(results.countryCounts);
+  const countryVals = Object.values(results.countryCounts);
+  upsertChart("countryBar", {
+    type: "bar",
+    data: { labels: countries, datasets: [{ data: countryVals, label: "Suspicious" }] },
+    options: {
+      plugins: { legend: { labels: { color: "#e5e7eb" } } },
+      scales: {
+        x: { ticks: { color: "#cbd5e1" }, grid: { color: "rgba(203,213,225,.1)" } },
+        y: { ticks: { color: "#cbd5e1" }, grid: { color: "rgba(203,213,225,.1)" } }
+      }
+    }
+  });
+
+  const dates = Object.keys(results.trendCounts).sort();
+  const trendVals = dates.map(d => results.trendCounts[d]);
+  upsertChart("trendLine", {
+    type: "line",
+    data: { labels: dates, datasets: [{ label: "Suspicious per day", data: trendVals, fill: false }] },
+    options: {
+      plugins: { legend: { labels: { color: "#e5e7eb" } } },
+      scales: {
+        x: { ticks: { color: "#cbd5e1" }, grid: { color: "rgba(203,213,225,.1)" } },
+        y: { ticks: { color: "#cbd5e1" }, grid: { color: "rgba(203,213,225,.1)" } }
+      }
+    }
+  });
+}
+
+function upsertChart(id, config) {
+  const ctx = document.getElementById(id).getContext("2d");
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(ctx, config);
+}
+
+// ---------- File handling ----------
+elFile.addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = evt => {
+    const text = evt.target.result;
+    const rows = parseCSV(text);
+    const results = detect(rows);
+    document.getElementById("alerts").innerHTML = ""; // reset alerts for new file
+    render(results);
+  };
+  reader.readAsText(file);
+});
+
+// ---------- Sample dataset (inline, tiny) ----------
+const SAMPLE = `transaction_id,customer_id,amount,country,type,date
+1,101,50000,India,UPI,2025-08-01
+2,102,1200000,Iran,NEFT,2025-08-02
+3,103,700000,UAE,Cash,2025-08-03
+4,104,3000,India,UPI,2025-08-03
+5,105,1500000,North Korea,SWIFT,2025-08-04
+6,101,520000,India,Cash,2025-08-05
+7,101,650000,India,NEFT,2025-08-06
+8,101,700000,India,SWIFT,2025-08-07
+9,110,250000,USA,UPI,2025-08-08
+10,118,1300000,UK,NEFT,2025-08-09
+11,118,900000,UK,Cash,2025-08-09
+12,130,1700000,Singapore,SWIFT,2025-08-10`;
+
+document.getElementById("loadSample").addEventListener("click", () => {
+  const rows = parseCSV(SAMPLE);
+  document.getElementById("alerts").innerHTML = "";
+  render(detect(rows));
+});
+
+// ---------- STR (Suspicious Transaction Report) PDF ----------
+document.getElementById("downloadSTR").addEventListener("click", () => {
+  if (!latestResults) { alert("Please upload a CSV or load the sample first."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFont("helvetica","bold"); doc.setFontSize(14);
+  doc.text("Suspicious Transaction Report (STR) – Demo", 14, 16);
+  doc.setFont("helvetica","normal"); doc.setFontSize(10);
+  doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 24);
+  doc.text(`Total transactions: ${latestResults.total}`, 14, 31);
+  doc.text(`Suspicious: ${latestResults.suspiciousCount}`, 14, 37);
+  doc.text(`Unique customers: ${latestResults.uniqueCustomers}`, 14, 43);
+  doc.text(`High-risk customers: ${latestResults.highRiskCustomers}`, 14, 49);
+
+  let y = 58;
+  doc.setFont("helvetica","bold"); doc.text("Flagged Transactions:", 14, y); y += 6;
+  doc.setFont("helvetica","normal");
+
+  const flagged = latestResults.rows.filter(r => r.suspicious).slice(0, 20); // cap for one page
+  if (flagged.length === 0) {
+    doc.text("None", 14, y);
+  } else {
+    flagged.forEach((r, idx) => {
+      const line = `${idx+1}. Tx ${r.transaction_id} | Cust ${r.customer_id} | ₹${r.amount} | ${r.type} | ${r.country} | ${r.date}`;
+      doc.text(line, 14, y); y += 6;
+      const msg = `Reasons: ${r.reasons.join("; ")}`;
+      const split = doc.splitTextToSize(msg, 180);
+      split.forEach(t => { doc.text(t, 18, y); y += 5; });
+      y += 2;
+      if (y > 280 && idx < flagged.length - 1) { doc.addPage(); y = 20; }
+    });
+  }
+
+  doc.save("STR_report_demo.pdf");
+});
+</script>
+</body>
+</html>
